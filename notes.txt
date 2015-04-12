@@ -9,7 +9,7 @@ Feyzo:
   Get dashboard to work with SCXMLD.
   Example of authentication front-end that works with ldap. 
   SCXML save that traverses the filesystem and pulls in resources (scripts, json) automatically. 
-
+  Capture logs for instance. Cat logs.
 
 Alex:
   Targetless transitions. Do not show as loops.
@@ -17,5 +17,7 @@ Alex:
   Support for UML comments. Model as UML note with arrow transition pointing backward.
   Internal transitions.
   Auto-zoom to area that changed since last save. Animate color on entry.
+  Hover over a transition to highlight it, source and target states - interactivity.
+  Search inside visualization
 
 Better tooling: show js errors. 
