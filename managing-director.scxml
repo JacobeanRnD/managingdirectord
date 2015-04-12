@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+ Docker container manager. 
+ Models docker lifecycle behaviour.
+ Actions support saving snapshot to a database, and restoring snapshot from database on crash. 
+
+ Datamodel:
+  image
+  
+ Algorithm:
+  Script initialization: set up dockerode. 
+  dockerode creates container from image
+
+  Make restarting manual for now.
+    Bonus: demonstrate how it could be automated.
+      Timeout. Maximum number of retries. 
+
+ Testing strategy:
+  Dockerode mock. 
+
+Test the following edge cases
+  - Event timeout on send to docker container
+  - Container crash and manual restart
+  - Container crash and automatic restart
+  
+TODO: implement a docker machinepack
+-->
+<scxml xmlns="http://www.w3.org/2005/07/scxml" name="helloworld" datamodel="ecmascript" version="1.0">
+  <datamodel>
+    <data id="dockerImageName"/>
+    <data id="sandbox"/>    <!-- TODO: not serializable. so what do we do about that? -->
+  </datamodel>
+  <script>
+    <!-- init docker -->
+    <!-- TODO: break this out. When we support saving SCXML as scripts -->
+    <![CDATA[
+      var docker = new Docker({ socketPath : '/var/run/docker.sock' });
+      var fs = require('fs');
+      var request = require('request');
+
+      //TODO: mock this
+      //best thing would be to load a script dynamically. but for now I think we need to inject the mock
+      function createSandbox(options,cb){
+        var sandbox = {};
+
+        var t0 = new Date();
+        docker.createContainer(
+          {
+            Image: options.image, 
+            Memory: 128000000,
+            RestartPolicy: 'always',
+            MaximumRetryCount: 10,
+            ReadonlyRootfs : true,
+            Tty : false
+          }, 
+          function (err, container) {
+            if(err) return cb(err);
+            console.log('Created container');
+
+            sandbox.container = container;
+
+            container.attach({stream: true, stdout: true, stderr: true}, function (err, stream) {
+              stream.pipe(process.stdout);
+            });
+
+            var t1 = new Date();
+            console.log('ms until created',t1 - t0);
+            container.start(function (err, data) {
+              if(err) return cb(err);
+              console.log('Started container');
+            
+              sandbox.container = container;
+              
+              var t2 = new Date();
+              console.log('ms until started',t2 - t1);
+              container.inspect(function(err, info){
+                if(err) return cb(err);
+                console.log('Container info');
+                
+                sandbox.pid = info.State.Pid;
+                sandbox.ip = info.NetworkSettings.IPAddress;
+                sandbox.startedAt = new Date(info.State.StartedAt);
+                sandbox.id = container.id;
+
+                var t3 = new Date();
+                console.log('ms to inspect',t3 - t2);
+                function waitUntilReady(){
+                  console.log('Server not ready yet',sandbox.ip);
+                  var url = 'http://' + sandbox.ip + ':3000/start';
+                  request({
+                    url: url,
+                    method : 'POST'
+                  },function(err, res, body){
+                    console.log('err',err,body);
+                    if(err) return setTimeout(waitUntilReady,100);
+
+                    if(res.statusCode !== 200) return setTimeout(waitUntilReady,100);
+
+                    var t4 = new Date();
+                    console.log('ms until ready',t4 - t3);
+                    console.log('ms total to bring up new container',t4 - t0);
+                    return cb(null, sandbox, body);
+                  });
+                }
+
+                setTimeout(waitUntilReady,100);
+              });
+            });
+          }
+        );
+      }
+    ]]>
+  </script>
+  <state id="Initial">
+    <onentry>
+      <script>
+        var that = this;
+        createSandbox({ image : dockerImageName },function(err, sbox){
+          if(err) return that.send({name : "error.docker.created", data : err})
+
+          sandbox = sbox;   //now we have the sandbox
+          that.send({name : "docker.created", data : err})
+
+          //TODO: subscribe to events on the docker container
+        });
+      </script>
+    </onentry>
+    <!-- Create container -->
+    <transition target="First-created" event="docker.created"/>
+    <transition target="Failed-to-create" event="error.docker.created"/>
+  </state>
+
+  <state id="Failed-to-create"></state>
+
+  <parallel id="Created">
+    <!-- start polling for events -->
+    <!-- these transitions delegate to docker -->
+    <transition event="system.stop">
+      <script>
+        sandbox.container.stop(function(err){
+          if(err) return this.send({"name":"error.docker.stop"});
+          this.send({"name":"docker.stopped"});
+        }.bind(this));
+      </script>
+    </transition>
+    <transition event="system.start">
+      <script>
+        sandbox.container.stop(function(err){
+          if(err) return this.send({"name":"error.docker.stop"});
+          this.send({"name":"docker.stopped"});
+        }.bind(this));
+      </script>
+    </transition>
+    <transition event="system.run">
+      <script>
+        sandbox.container.stop(function(err){
+          if(err) return this.send({"name":"error.docker.stop"});
+          this.send({"name":"docker.stopped"});
+        }.bind(this));
+      </script>
+    </transition>
+    <transition event="system.restart">
+      <script>
+        sandbox.container.stop(function(err){
+          if(err) return this.send({"name":"error.docker.stop"});
+          this.send({"name":"docker.stopped"});
+        }.bind(this));
+      </script>
+    </transition>
+    <transition event="system.rm">
+      <script>
+        sandbox.container.stop(function(err){
+          if(err) return this.send({"name":"error.docker.stop"});
+          this.send({"name":"docker.stopped"});
+        }.bind(this));
+      </script>
+    </transition>
+    <transition event="system.kill">
+      <script>
+        sandbox.container.stop(function(err){
+          if(err) return this.send({"name":"error.docker.stop"});
+          this.send({"name":"docker.stopped"});
+        }.bind(this));
+      </script>
+    </transition>
+    <!-- TODO: attach and wait? -->
+    
+    <state id="Polling-docker-events">
+      <datamodel>
+        <data id="lastPollTimestamp"/>
+      </datamodel>
+      <onentry>
+        <assign location="lastPollTimestamp" expr="new Date()"/>
+      </onentry>
+      <state id="Requesting-events">
+        <onentry>
+          <!-- 
+               Handle each one of:
+                * create, 
+                * destroy, 
+                * die, 
+                * export, 
+                * kill, 
+                * pause, 
+                * restart, 
+                * start, 
+                * stop, 
+                * unpause
+          -->
+          <script>
+            sandbox.container.events({
+              since : lastPollTimestamp, 
+              filter : {container : sandbox.id}
+            }, function(err,events){
+                if(err) this.send({name : 'error.docker.polling'});
+                events.forEach(function(event){
+                  this.send({name : 'docker.' + event.status, data : event}); 
+                }.bind(this));
+                this.send({name : 'docker.polling.success'}); 
+            }.bind(this));
+          </script>
+        </onentry>
+        <transition target="Error-polling" event="error.docker.polling"/>
+        <transition target="Polling-wait" event="docker.polling.success"/>
+      </state>
+      <state id="Polling-wait">
+        <onentry>
+          <send delay="100ms" event="polling.timeout"/>
+        </onentry>
+        <transition target="Requesting-events" event="polling.timeout"/>
+      </state>
+      <state id="Error-polling">
+      </state>
+    </state>
+    <state id="Runtime-state">
+      <state id="Stopped">
+        <state id="First-created">
+        </state>
+        <state id="User-requested"></state>
+        <state id="Crashed">
+          <state id="Deciding-whether-to-restart">
+            <transition target="Restarting" event="system.restart"/>
+          </state>
+          <state id="Restarting">
+            <transition target="Failed-to-start" event="error.docker.start"/>
+          </state>
+        </state>
+        <transition target="Started" event="docker.started"/>
+        <transition target="Started" event="error.docker.start"/>
+      </state>
+
+      <state id="Started">
+        <state id="Running">
+          <!-- embedded circuit breaker logic to intercept events -->
+          <!-- TODO: if only we had <invoke> -->
+          <transition target="Paused" event="docker.paused"/>
+        </state>
+        <state id="Paused">
+          <transition target="Running" event="docker.unpaused"/>
+        </state>
+        <transition target="User-requested" event="docker.stopped"/>
+        <transition target="Crashed" event="docker.crashed"/>
+      </state>
+
+      <state id="Failed-to-start"/>
+
+      <transition target="Removed" event="docker.removed"/>
+    </state>
+  </parallel>
+
+
+  <final id="Removed"/>
+  
+  <!-- TODO: implement maximum automated retry limit -->
+  <final id="Fubared"/>
+</scxml>

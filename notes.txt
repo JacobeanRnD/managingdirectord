@@ -1,0 +1,21 @@
+Michael:
+Let's create a prototype with docker swarm. Program the docker API.
+Solve the problem of briding docker networks.
+  How to do it on swarm?
+  How to do it on coreos?
+
+Feyzo:
+  Make sure dashboard is working. 
+  Get dashboard to work with SCXMLD.
+  Example of authentication front-end that works with ldap. 
+  SCXML save that traverses the filesystem and pulls in resources (scripts, json) automatically. 
+
+
+Alex:
+  Targetless transitions. Do not show as loops.
+  <script> shows first line of js, plus ellipses if there is more than one line.
+  Support for UML comments. Model as UML note with arrow transition pointing backward.
+  Internal transitions.
+  Auto-zoom to area that changed since last save. Animate color on entry.
+
+Better tooling: show js errors. 

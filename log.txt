@@ -1,0 +1,17 @@
+Functionality
+
+1. Model docker container lifecycle in SCXML. States, transitions and events. 
+2. Include a circuit breaker for communicating with the SCXML container. 
+3. Persist snapshot to database. 
+
+Tests for Failure
+
+1. Send event into container. Event times out. 
+2. Container crash event; container restart.
+
+Edge cases:
+
+1. Use <script> for stateless init. 
+2. 
+
+Test crash behaviour somehow. Mock objects?
