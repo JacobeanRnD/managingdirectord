@@ -10,6 +10,7 @@ Feyzo:
   Example of authentication front-end that works with ldap. 
   SCXML save that traverses the filesystem and pulls in resources (scripts, json) automatically. 
   Capture logs for instance. Cat logs.
+  Include in validation: all targets in the transiiton graph exist
 
 Alex:
   Targetless transitions. Do not show as loops.
@@ -19,5 +20,8 @@ Alex:
   Auto-zoom to area that changed since last save. Animate color on entry.
   Hover over a transition to highlight it, source and target states - interactivity.
   Search inside visualization
+  Make it so that we can collapse states
 
 Better tooling: show js errors. 
+
+And the biggest major feature improvement: First-class support for <invoke>

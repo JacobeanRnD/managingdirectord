@@ -86,3 +86,7 @@ onEntry - All-good
 onEntry - Started
 onEntry - Paused
 
+-------------
+
+scxml send managing-director.scxml/test system.react.request '{"name" : "t"}' 
+simply sending a string which cannot be parsed as regular JSON. goddamn it. 
