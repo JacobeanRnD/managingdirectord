@@ -54,3 +54,35 @@ Rather than JSON:
 
 
 
+--------
+
+
+
+npm test for SCXMLD installs scxmld infinite times
+it should install SCXMLD 0 times. Why would tests install anything when SCXMLD is immediately available?
+
+
+---------
+
+On initial page load, should hilight states based on full configuration (basic configuration + parent states)
+
+
+--------
+
+Bug in SCION?
+Targetless transitions maybe not being processed correctly.
+onExit - Running
+onExit - Started
+onExit - All-good
+onExit - Alive
+onExit - Runtime-errors
+onExit - Lifecycle
+onExit - Created
+onEntry - Created
+onEntry - Lifecycle
+onEntry - Runtime-errors
+onEntry - Alive
+onEntry - All-good
+onEntry - Started
+onEntry - Paused
+

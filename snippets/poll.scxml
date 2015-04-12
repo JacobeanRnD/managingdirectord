@@ -1,0 +1,46 @@
+    <state id="Polling-docker-events">
+      <datamodel>
+        <data id="lastPollTimestamp"/>
+      </datamodel>
+      <onentry>
+        <assign location="lastPollTimestamp" expr="new Date()"/>
+      </onentry>
+      <state id="Requesting-events">
+        <onentry>
+          <!-- 
+               Handle each one of:
+                * create, 
+                * destroy, 
+                * die, 
+                * export, 
+                * kill, 
+                * pause, 
+                * restart, 
+                * start, 
+                * stop, 
+                * unpause
+          -->
+          <script>
+            sandbox.container.events({
+              since : lastPollTimestamp, 
+              filter : {container : sandbox.id}
+            }, function(err,events){
+                if(err) this.send({name : 'error.docker.polling'});
+                events.forEach(function(event){
+                  this.send({name : 'docker.' + event.status, data : event}); 
+                }.bind(this));
+                this.send({name : 'docker.polling.success'}); 
+            }.bind(this));
+          </script>
+        </onentry>
+        <transition target="Error-polling" event="error.docker.polling"/>
+        <transition target="Polling-wait" event="docker.polling.success"/>
+      </state>
+      <state id="Polling-wait">
+        <onentry>
+          <send delay="100ms" event="polling.timeout"/>
+        </onentry>
+        <transition target="Requesting-events" event="polling.timeout"/>
+      </state>
+      <state id="Error-polling"></state>
+    </state>

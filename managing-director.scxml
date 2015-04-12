@@ -119,211 +119,193 @@ TODO: implement a docker machinepack
       }
     ]]>
   </script>
-  <state id="Initial">
-    <onentry>
-      <script>
-        var that = this;
-        createSandbox(function(err, sbox){
-          if(err){ 
-            console.log('error starting docker container',err, sbox);
-            return that.send({name : "error.docker.created", data : err})
-          }
-
-          sandbox = sbox;   //now we have the sandbox
-          console.log('started sandbox',sandbox.ip);
-          that.send({name : "docker.created", data : err})
-
-          //TODO: subscribe to events on the docker container
-        });
-      </script>
-    </onentry>
-    <!-- Create container -->
-    <transition target="Created" event="docker.created"/>
-    <transition target="Failed-to-create" event="error.docker.created"/>
-  </state>
-
-  <state id="Failed-to-create"></state>
-
-  <parallel id="Created">
-    
-    <state id="Polling-docker-events">
-      <datamodel>
-        <data id="lastPollTimestamp"/>
-      </datamodel>
+  <state id="main">
+    <transition event="error.*">
+      <!-- log all uncaught errors --> 
+      <log label="Uncaught error" expr="event"/>
+    </transition>
+    <state id="Initial">
       <onentry>
-        <assign location="lastPollTimestamp" expr="new Date()"/>
+        <script>
+          var that = this;
+          createSandbox(function(err, sbox){
+            if(err){ 
+              console.log('error starting docker container',err, sbox);
+              return that.send({name : "error.docker.created", data : err})
+            }
+
+            sandbox = sbox;   //now we have the sandbox
+            console.log('started sandbox',sandbox.ip);
+            that.send({name : "docker.created", data : err})
+
+          });
+        </script>
       </onentry>
-      <state id="Requesting-events">
-        <onentry>
-          <!-- 
-               Handle each one of:
-                * create, 
-                * destroy, 
-                * die, 
-                * export, 
-                * kill, 
-                * pause, 
-                * restart, 
-                * start, 
-                * stop, 
-                * unpause
-          -->
-          <script>
-            sandbox.container.events({
-              since : lastPollTimestamp, 
-              filter : {container : sandbox.id}
-            }, function(err,events){
-                if(err) this.send({name : 'error.docker.polling'});
-                events.forEach(function(event){
-                  this.send({name : 'docker.' + event.status, data : event}); 
-                }.bind(this));
-                this.send({name : 'docker.polling.success'}); 
-            }.bind(this));
-          </script>
-        </onentry>
-        <transition target="Error-polling" event="error.docker.polling"/>
-        <transition target="Polling-wait" event="docker.polling.success"/>
-      </state>
-      <state id="Polling-wait">
-        <onentry>
-          <send delay="100ms" event="polling.timeout"/>
-        </onentry>
-        <transition target="Requesting-events" event="polling.timeout"/>
-      </state>
-      <state id="Error-polling"></state>
+      <!-- Create container -->
+      <transition target="Created" event="docker.created"/>
+      <transition target="Failed-to-create" event="error.docker.created"/>
     </state>
 
-    <state id="Lifecycle">
-      <transition event="docker.create"/>  <!-- ignore docker.create -->
-      <transition event="docker.destroy" target="Destroyed"/>
-      <transition event="docker.die" target="Crashed"/>
-      <transition event="docker.kill" target="Killed"/>
-      <transition event="docker.pause" target="Paused"/>
-      <transition event="docker.restart" target="Running"/>
-      <transition event="docker.start" target="Running"/>
-      <transition event="docker.stop" target="Stopped"/>
-      <transition event="docker.unpause" target="Running"/>
+    <state id="Failed-to-create"></state>
 
-      <initial>
-        <transition target="Alive"/>
-      </initial>
-
-      <state id="Crashed">
-        <transition target="Restarting" event="system.restart"/>
-      </state>
-
-      <state id="Killed">
-        <transition target="Restarting" event="system.restart"/>
-      </state>
-
-      <state id="Restarting">
+    <parallel id="Created">
+      
+      <state id="Lifecycle">
         <onentry>
           <script>
-            sandbox.container.restart(function(err){
-              if(err) return this.send({"name":"error.docker.restart"});
+            console.log('registering event listener');
+            sandbox.container.events({filter : { id : sandbox.id }},function(err, stream){
+              if(err) throw err;
+              console.log('opened event stream');
+              stream.on('data',function(event){
+                var dockerEvent = JSON.parse(event.toString());
+                console.log('Received docker event',dockerEvent );
+                
+                this.send({name : 'docker.' + dockerEvent.status, data : dockerEvent}); 
+              }.bind(this));
             }.bind(this));
           </script>
         </onentry>
-      </state>
 
-      <!-- TODO: we really want to start the container in a stopped state.
-            But due to current limitations in the docker container, he starts out as /started.
-            So we just go directly to Running 
-            -->
-      <state id="Alive">
+        <transition type="internal" event="docker.create"/>  <!-- ignore docker.create -->
+        <transition type="internal" event="docker.destroy" target="Destroyed"/>
+        <transition type="internal" event="docker.die" target="Crashed"/>
+        <transition type="internal" event="docker.kill" target="Killed"/>
+        <transition type="internal" event="docker.pause" target="Paused"/>
+        <transition type="internal" event="docker.restart" target="Running"/>
+        <transition type="internal" event="docker.start" target="Running"/>
+        <transition type="internal" event="docker.stop" target="Stopped"/>
+        <transition type="internal" event="docker.unpause" target="Running"/>
+
         <initial>
-          <transition target="Running"/>
+          <transition target="Alive"/>
         </initial>
 
-        <transition event="system.kill">
-          <script>
-            sandbox.container.kill(function(err){
-              if(err) return this.send({"name":"error.docker.kill"});
-            }.bind(this));
-          </script>
-        </transition>
-        
-  
-        <state id="Stopped">
-          <transition event="system.start">
+        <state id="Crashed">
+          <transition target="Restarting" event="system.restart"/>
+        </state>
+
+        <state id="Killed">
+          <transition target="Restarting" event="system.restart"/>
+        </state>
+
+        <state id="Restarting">
+          <onentry>
             <script>
-              sandbox.container.start(function(err){
-                if(err) return this.send({"name":"error.docker.start"});
+              sandbox.container.restart(function(err){
+                if(err) return this.send({"name":"error.docker.restart"});
+              }.bind(this));
+            </script>
+          </onentry>
+        </state>
+
+        <!-- TODO: we really want to start the container in a stopped state.
+              But due to current limitations in the docker container, he starts out as /started.
+              So we just go directly to Running 
+              -->
+        <state id="Alive">
+          <initial>
+            <transition target="Running"/>
+          </initial>
+
+          <transition event="system.kill">
+            <script>
+              sandbox.container.kill(function(err){
+                console.log('container.kill response',err);
+                if(err) return this.send({"name":"error.docker.kill"});
               }.bind(this));
             </script>
           </transition>
-
-          <transition target="Started" event="error.docker.start"/>
-        </state>
-
-        <state id="Started">
-          <transition event="system.stop">
-            <script>
-              sandbox.container.stop(function(err){
-                if(err) return this.send({"name":"error.docker.stop"});
-              }.bind(this));
-            </script>
-          </transition>
-
-          <state id="Running">
-            <!-- embedded circuit breaker logic to intercept events -->
-            <!-- TODO: this would be a perfect application of <invoke> -->
-            <transition event="system.event">
-              <log label="processing event" expr="_event"/>
-            </transition>
-
-            <transition event="system.pause">
+          
+    
+          <state id="Stopped">
+            <transition event="system.start">
               <script>
-                sandbox.container.pause(function(err){
-                  if(err) return this.send({"name":"error.docker.pause"});
+                console.log('container.start request');
+                sandbox.container.start(function(err){
+                  console.log('container.start response',err);
+                  if(err) return this.send({"name":"error.docker.start"});
                 }.bind(this));
               </script>
             </transition>
+
+            <transition target="Started" event="error.docker.start"/>
           </state>
 
-          <state id="Paused">
-            <transition event="system.unpause">
+          <state id="Started">
+            <transition event="system.stop">
               <script>
-                sandbox.container.unpause(function(err){
-                  if(err) return this.send({"name":"error.docker.unpause"});
+                sandbox.container.stop(function(err){
+                  console.log('container.stop response',err);
+                  if(err) return this.send({"name":"error.docker.stop"});
                 }.bind(this));
               </script>
             </transition>
+
+            <state id="Running">
+              <!-- embedded circuit breaker logic to intercept events -->
+              <!-- TODO: this would be a perfect application of <invoke> -->
+              <transition event="system.event">
+                <log label="processing event" expr="_event"/>
+              </transition>
+
+              <transition event="system.pause" target="Running">
+                <script>
+                  sandbox.container.pause(function(err){
+                    console.log('container.pause response',err);
+                    if(err) return this.send({"name":"error.docker.pause"});
+                  }.bind(this));
+                </script>
+              </transition>
+            </state>
+
+            <state id="Paused">
+              <transition event="system.unpause">
+                <script>
+                  console.log('here1');
+                  sandbox.container.unpause(function(err){
+                    console.log('container.unpause response',err);
+                    if(err) return this.send({"name":"error.docker.unpause"});
+                    
+                  }.bind(this));
+                </script>
+              </transition>
+            </state>
           </state>
         </state>
+
       </state>
 
-    </state>
+      <state id="Runtime-errors">
+        <state id="All-good">
+          <transition event="error.docker.destroy" target="Error-on-Destroyed"/>
+          <transition event="error.docker.die" target="Error-on-Crashed"/>
+          <transition event="error.docker.kill" target="Error-on-Killed"/>
+          <transition event="error.docker.pause" target="Error-on-Paused"/>
+          <transition event="error.docker.restart" target="Error-on-Restarting"/>
+          <transition event="error.docker.start" target="Error-on-Running"/>
+          <transition event="error.docker.stop" target="Error-on-Stopped"/>
+          <transition event="error.docker.unpause" target="Error-on-Unpause"/>
+        </state>
 
-    <state id="Runtime-errors">
-      <state id="All-good">
-        <transition event="error.docker.destroy" target="Error-on-Destroyed"/>
-        <transition event="error.docker.die" target="Error-on-Crashed"/>
-        <transition event="error.docker.kill" target="Error-on-Killed"/>
-        <transition event="error.docker.pause" target="Error-on-Paused"/>
-        <transition event="error.docker.restart" target="Error-on-Restarting"/>
-        <transition event="error.docker.start" target="Error-on-Running"/>
-        <transition event="error.docker.stop" target="Error-on-Stopped"/>
-        <transition event="error.docker.unpause" target="Error-on-Unpause"/>
+        <state id="Error">
+          <state id="Error-on-Destroyed"/>
+          <state id="Error-on-Crashed"/>
+          <state id="Error-on-Killed"/>
+          <state id="Error-on-Paused"/>
+          <state id="Error-on-Restarting"/>
+          <state id="Error-on-Running"/>
+          <state id="Error-on-Stopped"/>
+          <state id="Error-on-Unpause"/>
+          <transition target="All-good" event="docker.*"/>
+        </state>
       </state>
-
-      <state id="Error">
-        <state id="Error-on-Destroyed"/>
-        <state id="Error-on-Crashed"/>
-        <state id="Error-on-Killed"/>
-        <state id="Error-on-Paused"/>
-        <state id="Error-on-Restarting"/>
-        <state id="Error-on-Running"/>
-        <state id="Error-on-Stopped"/>
-        <state id="Error-on-Unpause"/>
-        <transition target="All-good" event="docker.*"/>
-      </state>
-    </state>
-  </parallel>
+    </parallel>
 
 
-  <final id="Destroyed"/>
-  
-  <!-- TODO: implement maximum automated retry limit -->
-  <final id="Fubared"/>
+    <final id="Destroyed"/>
+    
+    <!-- TODO: implement maximum automated retry limit -->
+    <final id="Fubared"/>
+  </state>
 </scxml>
